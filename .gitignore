@@ -1,0 +1,14 @@
+# Project Files
+database/databases/
+resources/*.json
+resources/*.db
+resources/configs/*
+!resources/configs/config_sample.json
+
+# Basic Python Stuff
+__pycache__/
+*.py[cod]
+
+# Jetbrains
+.idea/
+
