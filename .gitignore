@@ -4,6 +4,7 @@ resources/*.json
 resources/*.db
 resources/configs/*
 !resources/configs/config_sample.json
+*.log
 
 # Basic Python Stuff
 __pycache__/

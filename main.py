@@ -1,6 +1,8 @@
 import json
 import groupy.api.groups
 from groupy.client import Client
+from groupy.api.bots import Bot
+from groupy.api.attachments import Attachment
 import requests
 import datetime
 from apscheduler.schedulers.background import BlockingScheduler
@@ -11,6 +13,9 @@ from configuration import Configuration
 from metadata import Metadata
 import os
 import atexit
+from loguru import logger
+from functools import lru_cache
+
 
 from sleeper.model import Player
 
@@ -37,35 +42,29 @@ def pprint(str):
 
 
 def get_bot_by_bot_name(name, group_id):
-    global BOT
-    url = all_configs['GROUPME_API_URL'] + "bots?token=" + all_configs['GROUPME_API_TOKEN']
-    resp_j = requests.get(url).json()
-    for bot in resp_j['response']:
-        if bot['name'] == name and bot['group_id'] == group_id:
-            BOT = bot
+    client = Client.from_token(all_configs['GROUPME_API_TOKEN'])
+    bots = client.bots.list()
+    for bot in bots:
+        if bot.bot_id == all_configs['GROUPME_BOT_ID']:
+            return bot
 
 
-def get_group_members():
-    group_id = BOT['group_id']
-    url = all_configs['GROUPME_API_URL'] + "groups/" + group_id + "?token=" + all_configs['GROUPME_API_TOKEN']
-    members = requests.get(url).json()['response']['members']
-    member_id_list = list()
-    for member in members:
-        mem = {
-            'user_id': member['user_id'],
-            'length': len(member['nickname']),
-            'nick': member['nickname']
-        }
-        member_id_list.append(mem)
-    return member_id_list
+@lru_cache
+def get_current_group():
+    client = Client.from_token(all_configs['GROUPME_API_TOKEN'])
+    groups = client.groups.list_all()
 
+    for group in groups:
+        if group.data["id"] == all_configs['GROUPME_GROUP_ID']:
+            return group
 
 
 def get_latest_messages():
-    url = all_configs['GROUPME_API_URL'] + "groups/" + BOT['group_id'] + "/messages?token=" + all_configs['GROUPME_API_TOKEN'] + "&after_id=" + metadata.get_metadata_field('LAST_CHECKED_MSG_ID')
+    url = all_configs['GROUPME_API_URL'] + "groups/" + all_configs['GROUPME_GROUP_ID'] + "/messages?token=" + all_configs[
+        'GROUPME_API_TOKEN'] + "&after_id=" + metadata.get_metadata_field('LAST_CHECKED_MSG_ID')
     newMessage = False
     base_model = requests.get(url).json()
-    print(base_model)
+    logger.trace(base_model)
     latest_messages = base_model['response']['messages']
     if len(latest_messages) > 0:
         if latest_messages[-1]['id'] != metadata.get_metadata_field('LAST_CHECKED_MSG_ID'):
@@ -77,11 +76,13 @@ def get_latest_messages():
 
 def get_latest_trade():
     transactions = sleeper_wrapper.get_trades(all_configs['SLEEPER_LEAGUE_ID'], all_configs['PLAYER_FILE'])
-    new_trades =[]
+    new_trades = []
     new_trade = False
     if transactions[-1].last_updated != metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'):
         new_trade = True
-        new_trades = list(filter(lambda transaction: transaction.last_updated > metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'), transactions))
+        new_trades = list(filter(
+            lambda transaction: transaction.last_updated > metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'),
+            transactions))
         metadata.write_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP', transactions[-1].last_updated)
     return new_trade, new_trades
 
@@ -89,22 +90,13 @@ def get_latest_trade():
 def write_message(message, attachments=None, data=None):
     if attachments is None:
         attachments = []
-    url = all_configs['GROUPME_API_URL'] + "/bots/post?token=" + all_configs['GROUPME_API_TOKEN']
-    params = dict()
-    datas = {
-        'bot_id': BOT['bot_id'],
-        'text': message,
-        'attachments': attachments
-    }
-    if data is not None:
-        datas['attachments']: data['attachments']
-    params = json.dumps(datas).encode('utf8')
-    resp_js = requests.post(url, data=params, headers={'content-type': 'application/json'})
+
+    BOT.post(message, Attachment.from_bulk_data(attachments))
 
 
 def create_poll():
-
-    url = 'https://api.groupme.com/v3/poll/' + metadata.get_metadata_field('GROUPME_GROUP_ID') + "?token=" + metadata.get_metadata_field('GROUPME_API_TOKEN')
+    url = 'https://api.groupme.com/v3/poll/' + metadata.get_metadata_field(
+        'GROUPME_GROUP_ID') + "?token=" + metadata.get_metadata_field('GROUPME_API_TOKEN')
 
     current_timestamp = datetime.datetime.now().timestamp()
     tomorrow = round(current_timestamp + 82000)
@@ -128,9 +120,9 @@ def create_poll():
 def get_insult():
     return requests.get("https://evilinsult.com/generate_insult.php?lang=en&type=json")
 
+
 def add_all_to_message(msg_length):
-    attachments = []
-    attachments.append([])
+    attachments = [[]]
 
     attachments[0] = {
         "type": "mentions",
@@ -138,7 +130,7 @@ def add_all_to_message(msg_length):
         "user_ids": []
     }
     i = 0
-    for member in GROUP.members:
+    for member in get_current_group().members:
         attachments[0]['loci'].append([0, msg_length])
         attachments[0]['user_ids'].append(member.user_id)
         i += len(member.nickname) + 2
@@ -148,7 +140,8 @@ def add_all_to_message(msg_length):
 def process_sidebet(message):
     elements = message.split(',')
     if len(elements) != 4:
-        write_message("Invalid sidebet format! It must be in the format of '+sidebet Owner 1, Owner 2, consequence, details'")
+        write_message(
+            "Invalid sidebet format! It must be in the format of '+sidebet Owner 1, Owner 2, consequence, details'")
     else:
         sidebet = Sidebet(elements[0].strip(), elements[1].strip(), elements[2].strip(), elements[3].strip())
         write_message("Sidebet has been recorded as: " + str(sidebet))
@@ -163,11 +156,11 @@ def remove_keyword(message, keyword):
 
 
 def format_insult(insult, attachments):
-    members = get_group_members()
+    members = get_current_group().members
     nickname = ""
     for member in members:
-        if member['user_id'] == attachments[0]['user_ids'][0]:
-            nickname = member['nick']
+        if member.user_id == attachments[0]['user_ids'][0]:
+            nickname = member.nickname
     insult = f'@{nickname} - {insult}'
     attachments[0]['loci'][0][1] = len(insult)
     return insult, attachments
@@ -179,11 +172,10 @@ def message_switch(data):
     attachments = {}
 
     if message.startswith("@all"):
-        print(GROUP.members)
         msg = remove_keyword(message, "@all")
         attachments = add_all_to_message(len(msg))
         write_message(msg, attachments)
-        print("Mentioned all.")
+        logger.debug("Mentioned all.")
     elif message.startswith("poll"):
         create_poll()
     elif message.startswith("+repeat"):
@@ -214,12 +206,15 @@ def check_messages():
     new_message, messages = get_latest_messages()
     for message in messages:
         if new_message and message['text'] is not None:
-            print("[" + str(datetime.datetime.fromtimestamp(message['created_at'])) + "] [" + message['name'] + "]: " + message['text'])
+            logger.debug(
+                "[" + str(datetime.datetime.fromtimestamp(message['created_at'])) + "] [" + message['name'] + "]: " +
+                message['text'])
+            # print("[" + str(datetime.datetime.fromtimestamp(message['created_at'])) + "] [" + message['name'] + "]: " + message['text'])
             message_switch(message)
 
 
 def check_trades():
-    print('Checking trades...')
+    logger.trace('Checking trades...')
     newTrade, trades = get_latest_trade()
     players: dict[str, Player] = sleeper_wrapper.get_players(all_configs['PLAYER_FILE'])
     if newTrade:
@@ -234,22 +229,7 @@ def check_trades():
                 else:
                     str += USER_ID_TO_PERSON_MAP[owner_id] + '!'
             write_message(str)
-            print(trade)
-    else:
-        print('No new trades.')
-
-
-def check_quit():
-    isStopped = False
-    # This is here to simulate application activity (which keeps the main thread alive).
-    if keyboard.is_pressed('Esc'):
-        print("Esc pressed")
-        if not isStopped:
-            write_message("The Dude has been shutdown. Messages will no longer be delivered to him.")
-            isStopped = True
-            scheduler.shutdown()
-            print('Exiting on Esc...')
-            sys.exit(0)
+            logger.debug(f'New trade: {trade}')
 
 
 def exit_handler():
@@ -263,14 +243,19 @@ def setup_db():
         USING_DATABASE = True
 
 
+def setup_logger():
+    log_level = "TRACE" if DEBUG else "DEBUG"
+    logger.remove()
+    logger.add(sys.stderr, level=log_level)
+    logger.add("app.log", level=log_level)
+
 
 if __name__ == '__main__':
-    CLIENT = ''
-    GROUP: groupy.api.groups.Group
-    # all_configs = {}
-    BOT = None
+
     DEBUG = bool(os.environ.get('DEBUG'))
     USING_DATABASE = False
+
+    setup_logger()
 
     metadata = Metadata()
     all_configs = Configuration().get_all_configs()
@@ -278,14 +263,8 @@ if __name__ == '__main__':
 
     # setup_db()
     atexit.register(exit_handler)
-    CLIENT = Client.from_token(all_configs['GROUPME_API_TOKEN'])
-    groups = CLIENT.groups.list_all()
-    for group in groups:
-        if group.data["id"] == all_configs['GROUPME_GROUP_ID']:
-            GROUP = group
-            break
 
-    get_bot_by_bot_name(all_configs['GROUPME_BOT_NAME'], all_configs['GROUPME_GROUP_ID'])
+    BOT: Bot = get_bot_by_bot_name(all_configs['GROUPME_BOT_NAME'], all_configs['GROUPME_GROUP_ID'])
     league = sleeper_wrapper.get_league(all_configs['SLEEPER_LEAGUE_ID'])
 
     # transactions = sleeper_wrapper.get_trades(all_configs['SLEEPER_LEAGUE_ID'])
@@ -297,16 +276,9 @@ if __name__ == '__main__':
     scheduler.add_job(check_messages, 'interval', seconds=2)
     scheduler.add_job(check_trades, 'interval', seconds=30)
 
-    # HOLD THE ESCAPE KEY TO EXIT THIS BOT GRACEFULLY
-    # scheduler.add_job(check_quit, 'interval', seconds=2)
-
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         sys.exit(0)
 
-
     # See PyCharm help at https://www.jetbrains.com/help/pycharm/
-
-
-

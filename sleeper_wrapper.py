@@ -17,6 +17,7 @@ from sleeper.model import (
 )
 from models.Trade import Trade
 from models.TradeConsenter import TradeConsenter
+from loguru import logger
 
 DEBUG = True
 
@@ -37,7 +38,7 @@ def get_league_users(league_id):
 
     CACHE['league_users'] = league_users
     end = time.time()
-    print(end - start)
+    logger.trace("Time taken to retrieve league users: " + str(round(end - start, 2)) + " seconds")
     return league_users
 
 

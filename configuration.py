@@ -1,5 +1,6 @@
 import os, sys
 import json
+from loguru import logger
 
 CONFIG_FILE = 'resources/configs/config_dod_test.json'
 
@@ -14,7 +15,7 @@ class Configuration:
 
     def __init__(self):
         if os.environ.get('DEBUG') == 'True':
-            print(f'In debug mode! Using {CONFIG_FILE}')
+            logger.debug(f'In debug mode! Using {CONFIG_FILE}')
             with open(CONFIG_FILE) as config_file:
                 self.config = json.load(config_file)
         else:
@@ -25,7 +26,7 @@ class Configuration:
                     var = os.environ[config_item]
                     self.config[config_item] = var
                 except KeyError:
-                    print(f'[error]: {config_item} environment variable required')
+                    logger.error(f'[error]: {config_item} environment variable required')
                     sys.exit(1)
         self.config.update(Configuration.OTHER_CONFIGS)
 
@@ -37,14 +38,3 @@ class Configuration:
             return self.config[field]
         else:
             return None
-#
-# def import_config():
-#     global CONFIG
-#     with open('resources/config_lathropolis.json') as config_file:
-#         CONFIG = json.load(config_file)
-#
-#
-# def write_to_config(config_entry, value):
-#     with open('resources/config_lathropolis.json', 'w', encoding='utf-8') as config_file:
-#         CONFIG[config_entry] = value
-#         json.dump(CONFIG, config_file, ensure_ascii=False, indent=4)
