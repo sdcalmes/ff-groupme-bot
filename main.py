@@ -1,13 +1,12 @@
 import json
-import groupy.api.groups
 from groupy.client import Client
 from groupy.api.bots import Bot
+from groupy.api.groups import Group
 from groupy.api.attachments import Attachment
 import requests
 import datetime
 from apscheduler.schedulers.background import BlockingScheduler
 import sys
-import keyboard
 from sheets import Sheets
 from configuration import Configuration
 from metadata import Metadata
@@ -60,17 +59,17 @@ def get_current_group():
 
 
 def get_latest_messages():
-    url = all_configs['GROUPME_API_URL'] + "groups/" + all_configs['GROUPME_GROUP_ID'] + "/messages?token=" + all_configs[
-        'GROUPME_API_TOKEN'] + "&after_id=" + metadata.get_metadata_field('LAST_CHECKED_MSG_ID')
     newMessage = False
-    base_model = requests.get(url).json()
-    logger.trace(base_model)
-    latest_messages = base_model['response']['messages']
-    if len(latest_messages) > 0:
-        if latest_messages[-1]['id'] != metadata.get_metadata_field('LAST_CHECKED_MSG_ID'):
+    group: Group = get_current_group()
+    try:
+        latest_messages = group.messages.list_after(metadata.get_metadata_field('LAST_CHECKED_MSG_ID'))
+    except Exception as ex:
+        logger.error("Exception: " + str(ex))
+        return
+    if len(latest_messages.items) > 0:
+        if latest_messages[-1].data['id'] != metadata.get_metadata_field('LAST_CHECKED_MSG_ID'):
             newMessage = True
-            metadata.write_metadata_field('LAST_CHECKED_MSG_ID', latest_messages[-1]['id'])
-            # write_last_checked_msg_id(LAST_CHECKED_MSG_ID, latest_messages[-1]['id'])
+            metadata.write_metadata_field('LAST_CHECKED_MSG_ID', latest_messages[-1].data['id'])
     return newMessage, latest_messages
 
 
@@ -90,8 +89,7 @@ def get_latest_trade():
 def write_message(message, attachments=None, data=None):
     if attachments is None:
         attachments = []
-
-    BOT.post(message, Attachment.from_bulk_data(attachments))
+    BOT.post(message, attachments)
 
 
 def create_poll():
@@ -121,18 +119,17 @@ def get_insult():
     return requests.get("https://evilinsult.com/generate_insult.php?lang=en&type=json")
 
 
-def add_all_to_message(msg_length):
-    attachments = [[]]
+def add_all_to_message(msg_length, attachments: list[Attachment]):
+    if len(attachments) == 0:
+        attachments.append(Attachment('mentions'))
 
-    attachments[0] = {
-        "type": "mentions",
-        "loci": [],
-        "user_ids": []
-    }
+    attachments[0].data['loci'] = []
+    attachments[0].data['user_ids'] = []
+
     i = 0
     for member in get_current_group().members:
-        attachments[0]['loci'].append([0, msg_length])
-        attachments[0]['user_ids'].append(member.user_id)
+        attachments[0].data['loci'].append([0, msg_length])
+        attachments[0].data['user_ids'].append(member.user_id)
         i += len(member.nickname) + 2
     return attachments
 
@@ -155,25 +152,25 @@ def remove_keyword(message, keyword):
     return message.split(keyword, 1)[1].strip()
 
 
-def format_insult(insult, attachments):
+def format_insult(insult, attachments: list[Attachment]):
     members = get_current_group().members
     nickname = ""
     for member in members:
-        if member.user_id == attachments[0]['user_ids'][0]:
+        if member.user_id == attachments[0].data['user_ids'][0]:
             nickname = member.nickname
     insult = f'@{nickname} - {insult}'
-    attachments[0]['loci'][0][1] = len(insult)
+    attachments[0].data['loci'][0][1] = len(insult)
     return insult, attachments
 
 
 def message_switch(data):
-    message = data['text']
-    user = data['name']
-    attachments = {}
+    message = data.text
+    user = data.name
+    attachments = data.attachments
 
     if message.startswith("@all"):
         msg = remove_keyword(message, "@all")
-        attachments = add_all_to_message(len(msg))
+        attachments = add_all_to_message(len(msg), attachments)
         write_message(msg, attachments)
         logger.debug("Mentioned all.")
     elif message.startswith("poll"):
@@ -182,11 +179,11 @@ def message_switch(data):
         msg = '{}, you sent "{}".'.format(user, remove_keyword(message, "repeat"))
         if DEBUG:
             msg = remove_keyword(message, "repeat")
-            attachments = add_all_to_message(len(remove_keyword(message, "repeat")))
+            attachments = add_all_to_message(len(remove_keyword(message, "repeat")), attachments)
         write_message(msg, attachments)
     elif message.startswith("+insult"):
         insult = get_insult().json()['insult']
-        attachments = data['attachments']
+        attachments = data.attachments
         if len(attachments) == 1:
             insult, attachments = format_insult(insult, attachments)
         write_message(insult, attachments)
@@ -205,11 +202,8 @@ def message_switch(data):
 def check_messages():
     new_message, messages = get_latest_messages()
     for message in messages:
-        if new_message and message['text'] is not None:
-            logger.debug(
-                "[" + str(datetime.datetime.fromtimestamp(message['created_at'])) + "] [" + message['name'] + "]: " +
-                message['text'])
-            # print("[" + str(datetime.datetime.fromtimestamp(message['created_at'])) + "] [" + message['name'] + "]: " + message['text'])
+        if new_message and message.text is not None:
+            logger.debug("[" + str(message.created_at) + "] [" + message.name + "]: " + message.text)
             message_switch(message)
 
 
