@@ -14,6 +14,8 @@ import os
 import atexit
 from loguru import logger
 from functools import lru_cache
+from gpt import GPT
+from models.Trade import Trade, TradeConsenter
 
 
 from sleeper.model import Player
@@ -83,36 +85,66 @@ def get_latest_trade():
             lambda transaction: transaction.last_updated > metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'),
             transactions))
         metadata.write_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP', transactions[-1].last_updated)
+    # if os.environ.get('DEBUG') == 'True':
+    #     return True, [transactions[-1]]
     return new_trade, new_trades
 
 
 def write_message(message, attachments=None, data=None):
+    if len(message) > 1000:
+        logger.error(f"Message greater than 1000 characters. Length: {len(message)}")
+        # message = "Response was unable to be posted. Reason: message > 1000 characters."
+        messages = message.split('.')
+        length = 0
+        msg_to_send = ""
+        for message in messages:
+            message += '. '
+            if length < 500:
+                msg_to_send += message
+                length += len(message)
+            else:
+                BOT.post(msg_to_send, attachments)
+                length = 0
+                msg_to_send = ""
+        return
     if attachments is None:
         attachments = []
     BOT.post(message, attachments)
 
 
-def create_poll():
-    url = 'https://api.groupme.com/v3/poll/' + metadata.get_metadata_field(
-        'GROUPME_GROUP_ID') + "?token=" + metadata.get_metadata_field('GROUPME_API_TOKEN')
+def create_trade_poll(trade: Trade):
+    url = all_configs['GROUPME_API_URL'] + 'poll/' + all_configs['GROUPME_GROUP_ID'] + "?token=" + all_configs['GROUPME_API_TOKEN']
 
     current_timestamp = datetime.datetime.now().timestamp()
     tomorrow = round(current_timestamp + 82000)
-    print(tomorrow)
+
+    NUM_MAP = {
+        1: '1st',
+        2: '2nd',
+        3: '3rd'
+    }
+
+    options = []
+    for owner_id, received in trade.consenters.items():
+        option = USER_ID_TO_PERSON_MAP[owner_id] + ' receives: '
+        for player in received.players:
+            option += f'{player.first_name} {player.last_name}, '
+        for pick in received.draft_picks:
+            option += f'{pick.season} {NUM_MAP[pick.round]}, '
+        option += f'{received.faab} faab. \n'
+        options.append({"title": option})
+
     data = {
-        "subject": "Poll me?",
-        "options": [
-            {"title": "Yes"},
-            {"title": "Absolutely"}
-        ],
+        "subject": "Instant reaction: Who got fleeced?",
+        "options": options,
         "expiration": tomorrow,
-        "type": "multi",
+        "type": "single",
         "visibility": "public"
     }
 
     r = requests.post(url, data=json.dumps(data))
-    write_message(r.text)
-    print(r)
+    if r.status_code != 201:
+        logger.error("Error posting poll: " + r.text)
 
 
 def get_insult():
@@ -163,6 +195,12 @@ def format_insult(insult, attachments: list[Attachment]):
     return insult, attachments
 
 
+def gpt_call(message):
+    chat_completion = gpt.chat_completion(message)
+    base = "[GPT]: "
+    return f"{base} {chat_completion}"
+
+
 def message_switch(data):
     message = data.text
     user = data.name
@@ -173,8 +211,8 @@ def message_switch(data):
         attachments = add_all_to_message(len(msg), attachments)
         write_message(msg, attachments)
         logger.debug("Mentioned all.")
-    elif message.startswith("poll"):
-        create_poll()
+    # elif message.startswith("poll"):
+    #     create_poll()
     elif message.startswith("+repeat"):
         msg = '{}, you sent "{}".'.format(user, remove_keyword(message, "repeat"))
         if DEBUG:
@@ -189,11 +227,14 @@ def message_switch(data):
         write_message(insult, attachments)
     elif message.startswith("+sidebet"):
         process_sidebet(remove_keyword(message, "sidebet"))
+    elif message.startswith("+gpt"):
+        write_message(gpt_call(remove_keyword(message, "gpt")), attachments)
     elif message.startswith("+help"):
         msg = "Here is the help documentation for The Dude:\n\n" \
               "'+repeat {message}' - repeat your message\n\n" \
               "'+insult {mention someone}' - insult someone\n\n" \
-              "'+sidebet Owner 1, Owner 2, consequence, details'\n\n" \
+              "'+sidebet {Owner 1}, {Owner 2}, {consequence}, {details} - log a sidebet to the google sheet'\n\n" \
+              "'+gpt {prompt} - Get a response from GPT. Expect a delay in response.\n\n" \
               "'@all {message}' - repeat the message, mention everyone\n\n" \
               "'+help' - show this help message"
         write_message(msg, attachments)
@@ -208,21 +249,28 @@ def check_messages():
 
 
 def check_trades():
+    NUM_MAP = {
+        1: '1st',
+        2: '2nd',
+        3: '3rd'
+    }
     logger.trace('Checking trades...')
     newTrade, trades = get_latest_trade()
     players: dict[str, Player] = sleeper_wrapper.get_players(all_configs['PLAYER_FILE'])
     if newTrade:
         write_message("A new trade has occurred!")
         for trade in trades:
-            cnt = 0
-            str = ''
-            for owner_id, received in trade.consenters.items():
-                if cnt == 0:
-                    str += USER_ID_TO_PERSON_MAP[owner_id] + ' has traded with '
-                    cnt += 1
-                else:
-                    str += USER_ID_TO_PERSON_MAP[owner_id] + '!'
-            write_message(str)
+            # str = ''
+            # for owner_id, received in trade.consenters.items():
+            #     str += USER_ID_TO_PERSON_MAP[owner_id] + ' receives: '
+            #     for player in received.players:
+            #         str += f'{player.first_name} {player.last_name}, '
+            #     for pick in received.draft_picks:
+            #         str += f'{pick.season} {NUM_MAP[pick.round]}, '
+            #     str += f'{received.faab} faab. \n'
+            # write_message(str)
+
+            create_trade_poll(trade)
             logger.debug(f'New trade: {trade}')
 
 
@@ -258,16 +306,17 @@ if __name__ == '__main__':
     # setup_db()
     atexit.register(exit_handler)
 
+    gpt = GPT()
     BOT: Bot = get_bot_by_bot_name(all_configs['GROUPME_BOT_NAME'], all_configs['GROUPME_GROUP_ID'])
     league = sleeper_wrapper.get_league(all_configs['SLEEPER_LEAGUE_ID'])
 
     # transactions = sleeper_wrapper.get_trades(all_configs['SLEEPER_LEAGUE_ID'])
-    write_message(f"{all_configs['GROUPME_BOT_NAME']} is alive.")
+    write_message(f"{all_configs['GROUPME_BOT_NAME']} is alive. Expect delays when making GPT calls.")
     check_messages()
     check_trades()
 
     scheduler = BlockingScheduler()
-    scheduler.add_job(check_messages, 'interval', seconds=2)
+    scheduler.add_job(check_messages, 'interval', seconds=2, max_instances=3)
     scheduler.add_job(check_trades, 'interval', seconds=30)
 
     try:
