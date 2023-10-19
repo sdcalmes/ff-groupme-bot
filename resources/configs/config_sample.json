@@ -3,6 +3,9 @@
     "GROUPME_BOT_ID": "",
     "GROUPME_BOT_NAME": "",
     "GROUPME_GROUP_ID": "",
-    "GOOGLE_SHEET_ID": "'-wL0bFeGY'",
-    "SLEEPER_LEAGUE_ID": ""
+    "GOOGLE_SHEET_ID": "''",
+    "SLEEPER_LEAGUE_ID": "",
+    "SLEEPER_ID_TO_OWNER_NAME": {
+        "sleeper_id": "Owner Name"
+    }
 }

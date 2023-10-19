@@ -2,12 +2,9 @@ import os, sys
 import json
 from loguru import logger
 
-CONFIG_FILE = 'resources/configs/config_dod_test.json'
-
-
 class Configuration:
     REQUIRED_CONFIGS = ["GROUPME_API_TOKEN", "GROUPME_BOT_NAME", "GROUPME_BOT_ID", "GROUPME_GROUP_ID",
-                        "SLEEPER_LEAGUE_ID", "GOOGLE_SHEET_ID", "WORKSHEET_NAME"]
+                        "SLEEPER_LEAGUE_ID", "GOOGLE_SHEET_ID", "WORKSHEET_NAME", "SLEEPER_ID_TO_OWNER_NAME"]
     OTHER_CONFIGS = {
         'GROUPME_API_URL': 'https://api.groupme.com/v3/',
         'PLAYER_FILE': 'resources/players.db'
@@ -16,9 +13,9 @@ class Configuration:
     def __init__(self):
         self.config = {}
         missing_config = False
-
-        with open(CONFIG_FILE) as config_file:
-            self.config = json.load(config_file)
+        if os.environ.get('CONFIG_FILE'):
+            with open(os.environ.get('CONFIG_FILE')) as config_file:
+                self.config = json.load(config_file)
         if os.environ.get('DEBUG') != 'False':
             # Ensure we have all necessary configs
             for config_item in Configuration.REQUIRED_CONFIGS:
