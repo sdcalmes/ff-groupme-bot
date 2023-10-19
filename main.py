@@ -19,27 +19,11 @@ from models.Trade import Trade, TradeConsenter
 
 
 from sleeper.model import Player
+from insults.InsultManager import  InsultManager
 
 from database.database import Database
 from models.Sidebet import Sidebet
 import sleeper_wrapper
-
-USER_ID_TO_PERSON_MAP = {
-    '76465061719588864': 'Drew Davis',
-    '81262579812810752': 'Justin Alt',
-    '94591622507282432': 'Victor Markus',
-    '333314910077321216': 'Sam Calmes',
-    '458362349540077568': 'Andrew Keal',
-    '458362357068853248': 'James Stecker',
-    '458362753975840768': 'Jake Folz',
-    '458428894018531328': 'Joe Keal',
-    '531163651048280064': 'Elliot Barquest',
-    '604372706426691584': 'Mike Letizia'
-}
-
-
-def pprint(str):
-    print(json.dumps(str, indent=2))
 
 
 def get_bot_by_bot_name(name, group_id):
@@ -61,7 +45,7 @@ def get_current_group():
 
 
 def get_latest_messages():
-    newMessage = False
+    new_message = False
     group: Group = get_current_group()
     try:
         latest_messages = group.messages.list_after(metadata.get_metadata_field('LAST_CHECKED_MSG_ID'))
@@ -70,23 +54,23 @@ def get_latest_messages():
         return
     if len(latest_messages.items) > 0:
         if latest_messages[-1].data['id'] != metadata.get_metadata_field('LAST_CHECKED_MSG_ID'):
-            newMessage = True
+            new_message = True
             metadata.write_metadata_field('LAST_CHECKED_MSG_ID', latest_messages[-1].data['id'])
-    return newMessage, latest_messages
+    return new_message, latest_messages
 
 
 def get_latest_trade():
-    transactions = sleeper_wrapper.get_trades(all_configs['SLEEPER_LEAGUE_ID'], all_configs['PLAYER_FILE'])
+    trades = sleeper_wrapper.get_trades(all_configs['SLEEPER_LEAGUE_ID'], all_configs['PLAYER_FILE'])
     new_trades = []
     new_trade = False
-    if transactions[-1].last_updated != metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'):
+    if trades[-1].last_updated != metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'):
         new_trade = True
         new_trades = list(filter(
             lambda transaction: transaction.last_updated > metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'),
-            transactions))
-        metadata.write_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP', transactions[-1].last_updated)
-    # if os.environ.get('DEBUG') == 'True':
-    #     return True, [transactions[-1]]
+            trades))
+        metadata.write_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP', trades[-1].last_updated)
+    if os.environ.get('DEBUG') == 'True':
+        return True, [trades[-1]]
     return new_trade, new_trades
 
 
@@ -118,7 +102,7 @@ def create_trade_poll(trade: Trade):
     current_timestamp = datetime.datetime.now().timestamp()
     tomorrow = round(current_timestamp + 82000)
 
-    NUM_MAP = {
+    num_map = {
         1: '1st',
         2: '2nd',
         3: '3rd'
@@ -126,13 +110,15 @@ def create_trade_poll(trade: Trade):
 
     options = []
     for owner_id, received in trade.consenters.items():
-        option = USER_ID_TO_PERSON_MAP[owner_id] + ' receives: '
+        option = all_configs['SLEEPER_ID_TO_OWNER_NAME'][owner_id] + ' receives: '
         for player in received.players:
             option += f'{player.first_name} {player.last_name}, '
         for pick in received.draft_picks:
-            option += f'{pick.season} {NUM_MAP[pick.round]}, '
+            option += f'{pick.season} {num_map[pick.round]}, '
         option += f'{received.faab} faab. \n'
         options.append({"title": option})
+
+    options.append({"title": "No one..it actually seems fair."})
 
     data = {
         "subject": "Instant reaction: Who got fleeced?",
@@ -145,10 +131,6 @@ def create_trade_poll(trade: Trade):
     r = requests.post(url, data=json.dumps(data))
     if r.status_code != 201:
         logger.error("Error posting poll: " + r.text)
-
-
-def get_insult():
-    return requests.get("https://evilinsult.com/generate_insult.php?lang=en&type=json")
 
 
 def add_all_to_message(msg_length, attachments: list[Attachment]):
@@ -211,8 +193,6 @@ def message_switch(data):
         attachments = add_all_to_message(len(msg), attachments)
         write_message(msg, attachments)
         logger.debug("Mentioned all.")
-    # elif message.startswith("poll"):
-    #     create_poll()
     elif message.startswith("+repeat"):
         msg = '{}, you sent "{}".'.format(user, remove_keyword(message, "repeat"))
         if DEBUG:
@@ -220,7 +200,7 @@ def message_switch(data):
             attachments = add_all_to_message(len(remove_keyword(message, "repeat")), attachments)
         write_message(msg, attachments)
     elif message.startswith("+insult"):
-        insult = get_insult().json()['insult']
+        insult = insult_manager.get_insult_as_text(data.data['sender_id'], attachments[0].user_ids[0])
         attachments = data.attachments
         if len(attachments) == 1:
             insult, attachments = format_insult(insult, attachments)
@@ -249,27 +229,11 @@ def check_messages():
 
 
 def check_trades():
-    NUM_MAP = {
-        1: '1st',
-        2: '2nd',
-        3: '3rd'
-    }
     logger.trace('Checking trades...')
-    newTrade, trades = get_latest_trade()
-    players: dict[str, Player] = sleeper_wrapper.get_players(all_configs['PLAYER_FILE'])
-    if newTrade:
+    new_trade, trades = get_latest_trade()
+    if new_trade:
         write_message("A new trade has occurred!")
         for trade in trades:
-            # str = ''
-            # for owner_id, received in trade.consenters.items():
-            #     str += USER_ID_TO_PERSON_MAP[owner_id] + ' receives: '
-            #     for player in received.players:
-            #         str += f'{player.first_name} {player.last_name}, '
-            #     for pick in received.draft_picks:
-            #         str += f'{pick.season} {NUM_MAP[pick.round]}, '
-            #     str += f'{received.faab} faab. \n'
-            # write_message(str)
-
             create_trade_poll(trade)
             logger.debug(f'New trade: {trade}')
 
@@ -309,6 +273,7 @@ if __name__ == '__main__':
     gpt = GPT()
     BOT: Bot = get_bot_by_bot_name(all_configs['GROUPME_BOT_NAME'], all_configs['GROUPME_GROUP_ID'])
     league = sleeper_wrapper.get_league(all_configs['SLEEPER_LEAGUE_ID'])
+    insult_manager = InsultManager()
 
     # transactions = sleeper_wrapper.get_trades(all_configs['SLEEPER_LEAGUE_ID'])
     write_message(f"{all_configs['GROUPME_BOT_NAME']} is alive. Expect delays when making GPT calls.")

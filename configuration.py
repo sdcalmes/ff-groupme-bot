@@ -14,20 +14,22 @@ class Configuration:
     }
 
     def __init__(self):
-        if os.environ.get('DEBUG') == 'True':
-            logger.debug(f'In debug mode! Using {CONFIG_FILE}')
-            with open(CONFIG_FILE) as config_file:
-                self.config = json.load(config_file)
-        else:
-            self.config = {}
+        self.config = {}
+        missing_config = False
+
+        with open(CONFIG_FILE) as config_file:
+            self.config = json.load(config_file)
+        if os.environ.get('DEBUG') != 'False':
             # Ensure we have all necessary configs
             for config_item in Configuration.REQUIRED_CONFIGS:
                 try:
                     var = os.environ[config_item]
                     self.config[config_item] = var
                 except KeyError:
+                    missing_config = True
                     logger.error(f'[error]: {config_item} environment variable required')
-                    sys.exit(1)
+        if missing_config:
+            sys.exit(1)
         self.config.update(Configuration.OTHER_CONFIGS)
 
     def get_all_configs(self):
