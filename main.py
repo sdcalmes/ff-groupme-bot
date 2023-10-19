@@ -4,6 +4,7 @@ from groupy.api.bots import Bot
 from groupy.api.groups import Group
 from groupy.api.attachments import Attachment
 import requests
+import time
 import datetime
 from apscheduler.schedulers.background import BlockingScheduler
 import sys
@@ -53,7 +54,9 @@ def get_latest_messages():
         logger.error("Exception: " + str(ex))
         return
     if len(latest_messages.items) > 0:
-        if latest_messages[-1].data['id'] != metadata.get_metadata_field('LAST_CHECKED_MSG_ID'):
+        latest_timestamp = latest_messages[-1].data['created_at']
+        if latest_messages[-1].data['id'] != metadata.get_metadata_field('LAST_CHECKED_MSG_ID')\
+                and latest_timestamp > STARTUP_TIMESTAMP:
             new_message = True
             metadata.write_metadata_field('LAST_CHECKED_MSG_ID', latest_messages[-1].data['id'])
     return new_message, latest_messages
@@ -154,7 +157,7 @@ def process_sidebet(message):
     else:
         sidebet = Sidebet(elements[0].strip(), elements[1].strip(), elements[2].strip(), elements[3].strip())
         write_message("Sidebet has been recorded as: " + str(sidebet))
-        sheet.add_sidebet(sidebet)
+        # sheet.add_sidebet(sidebet)
         if USING_DATABASE:
             with Database(all_configs['SLEEPER_LEAGUE_ID']) as db:
                 db.execute(sidebet)
@@ -258,12 +261,14 @@ if __name__ == '__main__':
 
     DEBUG = bool(os.environ.get('DEBUG'))
     USING_DATABASE = False
+    STARTUP_TIMESTAMP = time.time()
+    print(STARTUP_TIMESTAMP)
 
     setup_logger()
 
     metadata = Metadata()
     all_configs = Configuration().get_all_configs()
-    sheet = Sheets(all_configs['GOOGLE_SHEET_ID'], all_configs['WORKSHEET_NAME'])
+    # sheet = Sheets(all_configs['GOOGLE_SHEET_ID'], all_configs['WORKSHEET_NAME'])
 
     # setup_db()
     atexit.register(exit_handler)
