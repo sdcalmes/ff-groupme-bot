@@ -2,6 +2,7 @@ import os, sys
 import json
 from loguru import logger
 
+
 class Configuration:
     REQUIRED_CONFIGS = ["GROUPME_API_TOKEN", "GROUPME_BOT_NAME", "GROUPME_BOT_ID", "GROUPME_GROUP_ID",
                         "SLEEPER_LEAGUE_ID", "GOOGLE_SHEET_ID", "WORKSHEET_NAME", "SLEEPER_ID_TO_OWNER_NAME"]
@@ -19,6 +20,8 @@ class Configuration:
         if os.environ.get('DEBUG') != 'False':
             # Ensure we have all necessary configs
             for config_item in Configuration.REQUIRED_CONFIGS:
+                if config_item in self.config:
+                    continue
                 try:
                     var = os.environ[config_item]
                     self.config[config_item] = var

@@ -69,8 +69,6 @@ def get_latest_trade():
             lambda transaction: transaction.last_updated > metadata.get_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP'),
             trades))
         metadata.write_metadata_field('LAST_CHECKED_TRADE_TIMESTAMP', trades[-1].last_updated)
-    if os.environ.get('DEBUG') == 'True':
-        return True, [trades[-1]]
     return new_trade, new_trades
 
 
